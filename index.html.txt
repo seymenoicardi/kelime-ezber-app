@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kelime Ezber & Quiz</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f2f2f7; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: white; padding: 25px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); text-align: center; width: 100%; max-width: 360px; }
+        .word { font-size: 30px; font-weight: 700; color: #1c1c1e; margin-bottom: 20px; }
+        
+        .options-container { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        .option-btn { background: #f2f2f7; color: #007aff; border: 2px solid #e5e5ea; padding: 14px; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .option-btn:active { transform: scale(0.98); }
+        
+        .progress-container { background: #e5e5ea; border-radius: 8px; height: 8px; width: 100%; margin-bottom: 8px; overflow: hidden; }
+        .progress-bar { background: #34c759; height: 100%; width: 0%; transition: width 0.3s; }
+        .progress-text { font-size: 12px; color: #8e8e93; font-weight: 600; margin-bottom: 20px; }
+        
+        .bottom-nav { display: flex; gap: 10px; border-top: 1px solid #e5e5ea; padding-top: 15px; }
+        .action-btn { background: none; border: none; color: #8e8e93; font-size: 13px; font-weight: 600; cursor: pointer; flex: 1; }
+        .action-btn.active { color: #007aff; }
+        
+        .quiz-badge { background: #ff9500; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <!-- Oyun Alanı -->
+        <div id="gameArea">
+            <div id="wordDisplay" class="word">Yükleniyor...</div>
+            
+            <div class="options-container" id="optionsBox">
+                <!-- 3 Seçenek Buraya Gelecek -->
+            </div>
+
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+            <div id="progressText" class="progress-text">0 / 40</div>
+        </div>
+
+        <!-- Alt Menü ve Yükleme -->
+        <div class="bottom-nav">
+            <label for="fileInput" class="action-btn">📁 Liste Yükle</label>
+            <input type="file" id="fileInput" accept=".txt, .csv" style="display:none;" onchange="handleFileUpload(event)">
+            
+            <button class="action-btn" onclick="openWeeklyQuiz()">
+                📝 Haftalık Quiz <span id="wrongCountBadge" class="quiz-badge">0</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let defaultWords = [
+            {w: "Resilient", m: "Dayanıklı, esnek"},
+            {w: "Ambiguous", m: "Belirsiz, muğlak"},
+            {w: "Meticulous", m: "Titiz, özenli"},
+            {w: "Die Sehnsucht", m: "Özlem, hasret"},
+            {w: "Der Feierabend", m: "Mesai bitimi"},
+            {w: "Accomplish", m: "Başarmak"},
+            {w: "Crucial", m: "Hayati, önemli"}
+        ];
+
+        let currentQuestion = null;
+        let isQuizMode = false;
+
+        function getPool() {
+            return JSON.parse(localStorage.getItem('customWordList')) || defaultWords;
+        }
+
+        function getWrongWords() {
+            return JSON.parse(localStorage.getItem('wrongWords')) || [];
+        }
+
+        function saveWrongWord(wordObj) {
+            let wrongs = getWrongWords();
+            if (!wrongs.some(item => item.w === wordObj.w)) {
+                wrongs.push(wordObj);
+                localStorage.setItem('wrongWords', JSON.stringify(wrongs));
+            }
+            updateWrongBadge();
+        }
+
+        function removeWrongWord(wordObj) {
+            let wrongs = getWrongWords().filter(item => item.w !== wordObj.w);
+            localStorage.setItem('wrongWords', JSON.stringify(wrongs));
+            updateWrongBadge();
+        }
+
+        function getProgress() {
+            const today = new Date().toISOString().split('T')[0];
+            const data = JSON.parse(localStorage.getItem('dailyProgress') || '{}');
+            if (data.date !== today) return { date: today, count: 0 };
+            return data;
+        }
+
+        function updateWrongBadge() {
+            document.getElementById('wrongCountBadge').innerText = getWrongWords().length;
+        }
+
+        function loadNextCard() {
+            const pool = getPool();
+            const p = getProgress();
+
+            updateWrongBadge();
+
+            if (p.count >= 40 && !isQuizMode) {
+                document.getElementById('gameArea').innerHTML = `
+                    <div class="word">Tebrikler! 🎉</div>
+                    <p style="color:#666;">Bugünkü 40 kelimelik hedefinizi tamamladınız.</p>
+                `;
+                return;
+            }
+
+            // Yanlış bilinenlerden veya genel havuzdan seç
+            let availableWords = isQuizMode ? getWrongWords() : pool;
+
+            if (availableWords.length === 0) {
+                document.getElementById('gameArea').innerHTML = `
+                    <div class="word">${isQuizMode ? 'Quiz Temiz! 👏' : 'Kelime Yok'}</div>
+                    <p style="color:#666;">${isQuizMode ? 'Hatalı kelimeniz bulunmuyor.' : 'Lütfen dosya yükleyin.'}</p>
+                `;
+                return;
+            }
+
+            // Doğru kelimeyi seç
+            currentQuestion = availableWords[Math.floor(Math.random() * availableWords.length)];
+
+            // 2 Tane Yanlış Seçenek Oluştur
+            let wrongOptions = pool.filter(item => item.m !== currentQuestion.m);
+            wrongOptions.sort(() => 0.5 - Math.random());
+            
+            let choices = [
+                currentQuestion.m,
+                wrongOptions[0] ? wrongOptions[0].m : "Diğer Seçenek 1",
+                wrongOptions[1] ? wrongOptions[1].m : "Diğer Seçenek 2"
+            ];
+            
+            // Seçenekleri karıştır
+            choices.sort(() => 0.5 - Math.random());
+
+            // Arayüzü Güncelle
+            document.getElementById('wordDisplay').innerText = currentQuestion.w;
+            
+            let optionsHTML = '';
+            choices.forEach(choice => {
+                optionsHTML += `<button class="option-btn" onclick="checkAnswer('${choice}')">${choice}</button>`;
+            });
+            document.getElementById('optionsBox').innerHTML = optionsHTML;
+
+            if (!isQuizMode) {
+                document.getElementById('progressText').innerText = `${p.count} / 40`;
+                document.getElementById('progressBar').style.width = `${(p.count / 40) * 100}%`;
+            }
+        }
+
+        function checkAnswer(selectedMeaning) {
+            let p = getProgress();
+
+            if (selectedMeaning === currentQuestion.m) {
+                // DOĞRU CEVAP
+                alert("Tebrikler! Doğru Bildiniz. 🎉");
+                
+                if (isQuizMode) {
+                    removeWrongWord(currentQuestion);
+                } else {
+                    p.count += 1;
+                    localStorage.setItem('dailyProgress', JSON.stringify(p));
+                }
+            } else {
+                // YANLIŞ CEVAP
+                alert(`Yanlış! Doğru cevap: "${currentQuestion.m}" olacaktı.\nBu kelime tekrar sorulacak!`);
+                saveWrongWord(currentQuestion);
+            }
+
+            loadNextCard();
+        }
+
+        function openWeeklyQuiz() {
+            let wrongs = getWrongWords();
+            if (wrongs.length === 0) {
+                alert("Harika! Şimdilik hiç hatalı kelimeniz yok.");
+                return;
+            }
+            isQuizMode = true;
+            alert(`Haftalık Quiz Modu Başladı!\nToplam ${wrongs.length} hatalı kelimeniz test edilecek.`);
+            loadNextCard();
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const lines = e.target.result.split('\n');
+                let newWords = [];
+
+                lines.forEach(line => {
+                    let parts = line.split(/[,:\-]/);
+                    if (parts.length >= 2) {
+                        let w = parts[0].trim();
+                        let m = parts[1].trim();
+                        if (w && m) newWords.push({ w, m });
+                    }
+                });
+
+                if (newWords.length > 0) {
+                    localStorage.setItem('customWordList', JSON.stringify(newWords));
+                    alert(`${newWords.length} kelime başarıyla yüklendi!`);
+                    location.reload();
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Uygulama Başlat
+        loadNextCard();
+    </script>
+</body>
+</html>
